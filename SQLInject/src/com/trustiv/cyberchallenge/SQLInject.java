@@ -93,7 +93,7 @@ public class SQLInject {
         }
         
         int stringBuilderStart = findStartOfStringBuilder(method, insnLoc);
-        int createStmtLoc = ensureNewlyCreatedStatement(method, stringBuilderStart);
+        int createStmtLoc = findCreateStatement(method, stringBuilderStart);
         
         // Iterate through instructions, starting at StringBuilder construction and finishing at execution
         StringBuilder query = new StringBuilder();
@@ -106,6 +106,8 @@ public class SQLInject {
         iterator.remove();
         iterator.next();
         iterator.remove();
+        //duplicate PreparedStatement - we'll be using it again and again
+        iterator.add(new InsnNode(DUP));
         //push first paramNum to the stack
         iterator.add(new LdcInsnNode(paramNum));
         paramNum += 1;
@@ -120,7 +122,7 @@ public class SQLInject {
                                 && node.desc.startsWith("(Ljava/lang/String;")) {
                             String fragment = (String) lastConst;
                             if (fragment.startsWith("'")) fragment = fragment.substring(1);
-                            if (fragment.endsWith("'")) fragment = fragment.substring(0, fragment.length() - 2);
+                            if (fragment.endsWith("'")) fragment = fragment.substring(0, fragment.length() - 1);
                             query.append(fragment);
                             //remove redundant LDC and invokevirtual
                             iterator.previous();
@@ -173,6 +175,11 @@ public class SQLInject {
                             query.append("?");
                         } else if (node.name.equals("toString")) {
                             iterator.remove();
+                            /*
+                             * 2 things to pop - a no-longer-required paramNum,
+                             * and a surplus copy of the prepared statement
+                             */
+                            iterator.add(new InsnNode(POP));
                             iterator.add(new InsnNode(POP));
                         } else throw new RuntimeException("Unexpected StringBuilder operation");
                     }
@@ -203,6 +210,7 @@ public class SQLInject {
         //Finally, replace the createStatement with a prepareStatement
         MethodInsnNode createStmt = (MethodInsnNode) method.instructions.get(createStmtLoc);
         createStmt.name = "prepareStatement";
+        createStmt.desc = "(Ljava/lang/String;)Ljava/sql/PreparedStatement;";
         method.instructions.insertBefore(createStmt, new LdcInsnNode(query.toString()));
     }
     
@@ -221,7 +229,7 @@ public class SQLInject {
         throw new CantFixException("No StringBuilder constructor found");
     }
     
-    private static int ensureNewlyCreatedStatement(MethodNode method, int insnLoc) throws CantFixException {
+    private static int findCreateStatement(MethodNode method, int insnLoc) throws CantFixException {
         ListIterator<AbstractInsnNode> iterator = method.instructions.iterator(insnLoc);
         while (iterator.hasPrevious()) {
             int index = iterator.previousIndex();
@@ -231,13 +239,13 @@ public class SQLInject {
                 if (prevNode.owner.equals("java/sql/Connection")
                         && prevNode.name.equals("createStatement")) {
                     return index;
-                } else {
-                    throw new CantFixException();
-                }
+                }// else {
+                //    throw new CantFixException();
+                //}
             }
-            if ((node.getOpcode() != ALOAD) && (node.getOpcode() != ASTORE) && (node.getOpcode() != F_NEW)) {
-                throw new CantFixException();
-            }
+            //if ((node.getOpcode() != ALOAD) && (node.getOpcode() != ASTORE) && (node.getOpcode() != F_NEW)) {
+            //    throw new CantFixException();
+            //}
         }
         throw new CantFixException();
     }
