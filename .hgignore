@@ -1,0 +1,4 @@
+syntax: glob
+SQLInject/build.xml
+SQLInject/build/*
+SQLInject/nbproject/private/*
